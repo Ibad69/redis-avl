@@ -65,6 +65,8 @@ struct HNode {
 
 typedef struct HNode HNode;
 
+void out_nil(buffer_type *out);
+
 typedef struct  {
     HNode **tab;
     size_t mask;
@@ -91,7 +93,7 @@ typedef struct {
 }ZSet;
 
 typedef struct {
-    HNode hnode;
+    HNode hmap;
     AVLNode tree;
 
     char name[0];
@@ -111,12 +113,10 @@ static struct {
     HMap db; // top level hashtable
 }g_data;
 
-
 // ******************HASHMAP*****************//
-static HMap *hmap = NULL; 
+// static HMap *hmap = NULL; 
 
 void h_init(HTab *htab, size_t n) {
-    printf("creating a new htable? \n");
     // assert(n > 0 && ((n - 1) & n) == 0);
     htab->tab = (HNode **)calloc(n, sizeof(HNode *));
     htab->mask = n - 1;
@@ -125,8 +125,10 @@ void h_init(HTab *htab, size_t n) {
 
 // hashtable insertion
 void h_insert(HTab *htab, HNode *node) {
+    printf("trying to insert some value in this \n");
     size_t pos = node->hcode & htab->mask;
     HNode *next = htab->tab[pos];
+    printf("the position we are trying to add : %d \n", pos);
     node->next = next;
     htab->tab[pos] = node;
     htab->size++;
@@ -160,7 +162,6 @@ static HNode *h_detach(HTab *htab, HNode **from) {
 }
 
 const size_t k_rehashing_work = 128;    // constant work
-
 
 static void hm_help_rehashing(HMap *hmap) {
     size_t nwork = 0;
@@ -261,7 +262,16 @@ typedef struct  {
 static bool entry_eq(HNode *node, HNode *key) {
     Entry *ent = container_of(node, Entry, node);
     LookupKey *keydata = container_of(key, LookupKey, node);
-    return ent->key == keydata->key;
+    printf("keydata -> checking what the key is : %s \n", keydata->key);
+    if(ent == NULL) {
+        printf("ent is null over here \n");
+    }
+    if(ent && keydata) {
+        if(strcmp(ent->key, keydata->key) == 0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 // void htab_init() {
@@ -356,6 +366,42 @@ void insert_values_in_ht(char *key, char *value) {
 //     curr = curr->next;
 // }
 
+// inner level hashmap 
+typedef struct {
+    HNode node;
+    const char *name;
+    size_t len;
+} HKey;
+
+static bool hcmp(HNode *node, HNode *key) {
+    ZNode *znode = container_of(node, ZNode, hmap);
+    HKey *hkey = container_of(key, HKey, node);
+    printf("znode container key : %s \n", znode->name);
+    printf("znode container key : %d \n", znode->len);
+    printf("khey : %s \n", hkey->name);
+    printf("kheey len: %d \n", hkey->len);
+
+    if (znode->len != hkey->len) {
+        printf("returning false because len don't match");
+        return false;
+    }
+    return 0 == memcmp(znode->name, hkey->name, znode->len);
+}
+
+ZNode *zset_lookup(ZSet *zset, const char *name, size_t len) {
+    // if (!zset->root) {
+    //     printf("no root returning \n");
+    //     return NULL;
+    // }
+
+    HKey key;
+    key.node.hcode = hash_key(name);
+    key.name = name;
+    key.len = len;
+    HNode *found = hm_lookup(&zset->hmap, &key.node, &hcmp);
+    return found ? container_of(found, ZNode, hmap) : NULL;
+}
+
 typedef struct {
     char **items;   // array of strings
     size_t count;
@@ -401,28 +447,41 @@ bool zless_node(AVLNode *lhs, AVLNode *rhs)
 }
 
 void zset_insert(ZSet *zset, const char *name, double score, size_t len) {
+    printf("trying to add in the second level hashmap \n");
     ZNode *node = calloc(7,sizeof(ZNode));
 
     node->len = len;
     node->score = score;
     memcpy(&node->name[0], name, len);
 
-    node->hnode.hcode = hash_key(name);
+    node->hmap.hcode = hash_key(name);
     // find if this exists already
 
-    // hmap_insert(&zset->hmap, &node->hnode);
+    hm_insert(&zset->hmap, &node->hmap);
     // tree_insert(&zset->root, &node->tree, zless_node);
 }
 
-// void z_score(StringVec *cmd) {
-//     Entry *e = h_lookup(cmd[1);
-//     printf("the entry we have found : %s \n");
-//     if(e == NULL) {
-//         printf("expected some zset to exist for this value create one! \n");
-//     }
+void z_score(StringVec *cmd) {
+    // upper level hashtable finding
+    printf("finding the zscore \n");
+    LookupKey key;
+    key.key = malloc(strlen(cmd->items[1])+1);
+    if(key.key) {
+        strcpy(key.key, cmd->items[1]);
+        key.node.hcode = hash_key(key.key);
+    }
+    // hashtable lookup
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (!node) {
+        printf("couldn't find nodee ------ \n");
+        // return out_nil(out);
+    }
 
-//     Entry *zent = h_lookup(e->zset, cmd[2]);
-// }
+    Entry *ent = container_of(node, Entry, node);
+
+    ZNode *znode = zset_lookup(&ent->zset, cmd->items[2], strlen(cmd->items[2]));
+    printf("znode score : %d \n", znode->score);
+}
 
 void insert_zadd(StringVec *cmd) {
     // check if that value already exists for us 
@@ -437,11 +496,13 @@ void insert_zadd(StringVec *cmd) {
     ent->node.hcode = hash_key(ent->key);
     ent->node.next = NULL;   // important initialization
     memset(&ent->zset, 0, sizeof(ZSet));
-    // htab_insert(&ent->node);
+
+    hm_insert(&g_data.db, &ent->node);
 
     size_t len = strlen(cmd->items[3]);
     double score = strlen(cmd->items[2]);
     char *name = cmd->items[3];
+    printf("inserting the name : %s \n", name);
 
     zset_insert(&ent->zset, name, score, len);
 }
@@ -460,8 +521,8 @@ void buff_append(buffer_type *buf, const uint8_t *data, size_t len) {
         buf->capacity = new_capacity;
     }
 
-    printf("buf size : %d \n", buf->size);
-    printf("data length : %d \n", len);
+    // printf("buf size : %d \n", buf->size);
+    // printf("data length : %d \n", len);
 
     memcpy(buf->buff + buf->size, data, len);
     buf->size += len;
@@ -554,30 +615,30 @@ void do_zadd(buffer_type *out, StringVec *cmd) {
 }
 
 void do_zscore(buffer_type *out, StringVec *cmd) {
-    // z_score(cmd);
+    z_score(cmd);
 }
 
 
 void do_request(StringVec *strvec, buffer_type *buf) {
     if(strcmp(strvec->items[0], "get") == 0) {
-        printf("get command for items : %s \n", strvec->items[1]);
+        // printf("get command for items : %s \n", strvec->items[1]);
         do_get(buf, strvec);
     }
     if(strcmp(strvec->items[0], "set") == 0) {
-        printf("this is a set command for you \n");
+        // printf("this is a set command for you \n");
         do_set(buf, strvec);
     }
     if(strcmp(strvec->items[0], "del") == 0) {
         // delete some value from the hashmap
-        printf("this is a del command for you \n");
+        // printf("this is a del command for you \n");
     }
     if(strcmp(strvec->items[0], "zadd") == 0) {
         do_zadd(buf, strvec);
-        printf("this is a ZSet ADD Command \n");
-        printf("this is a ZSet ADD Command : %s \n", strvec->items[0]);
-        printf("this is a ZSet ADD Command : %s \n", strvec->items[1]);
-        printf("this is a ZSet ADD Command : %s \n", strvec->items[2]);
-        printf("this is a ZSet ADD Command : %s \n", strvec->items[3]);
+        // printf("this is a ZSet ADD Command \n");
+        // printf("this is a ZSet ADD Command : %s \n", strvec->items[0]);
+        // printf("this is a ZSet ADD Command : %s \n", strvec->items[1]);
+        // printf("this is a ZSet ADD Command : %s \n", strvec->items[2]);
+        // printf("this is a ZSet ADD Command : %s \n", strvec->items[3]);
     }
     if(strcmp(strvec->items[0], "zscore") == 0) {
         do_zscore(buf, strvec);
@@ -767,7 +828,7 @@ int32_t parse_req(const uint8_t **request, size_t len, StringVec *out) {
         return -1;
     }
 
-    printf("nstr is : %d \n", nstr);
+    // printf("nstr is : %d \n", nstr);
 
     while(out->count < nstr){
         uint32_t len = 0;
@@ -787,11 +848,11 @@ int try_one_request(Conn *client) {
 
     if(client->incoming_buff->size < 4) {
         // we need to check for more reads;
-        printf("returning because incoming buff size is less than 4 \n");
+        // printf("returning because incoming buff size is less than 4 \n");
         return 0;
     }
     uint32_t len = 0;
-    printf("data beefore mcmpy : %s \n", client->incoming_buff);
+    // printf("data beefore mcmpy : %s \n", client->incoming_buff);
     memcpy(&len, client->incoming_buff->buff, 4);
     // len = ntohl(len);   // <--- this is critical if receiving data in endian big-endian
 
@@ -806,14 +867,14 @@ int try_one_request(Conn *client) {
         }
 
         const uint8_t *request = &client->incoming_buff->buff[4];
-        printf("the request that is received with data : %s \n", request);
+        // printf("the request that is received with data : %s \n", request);
 
         StringVec *out = malloc(sizeof(StringVec));
         out->count = 0;
         out->items = malloc(2);
 
         if(parse_req(&request, len, out) == -1){
-            printf("there was an error parsing the request \n");
+            // printf("there was an error parsing the request \n");
             return false;
         };
 
@@ -901,10 +962,10 @@ void strip_newline(char *s) {
             // printf("buff incoming : %s \n", client.incoming_buff);
 
             buff_append(client.incoming_buff, tmpbuf, (rv));
-            for (int i = 0; i < 16; i++) {
-                printf("%02x ", client.incoming_buff->buff[i]);
-            }
-            printf("\n");
+            // for (int i = 0; i < 16; i++) {
+            //     printf("%02x ", client.incoming_buff->buff[i]);
+            // }
+            // printf("\n");
 
             // printf("the data reeceived by client : %s \n", client.incoming_buff->buff);
             while(try_one_request(&client) == 1){}
