@@ -96,9 +96,9 @@ typedef struct {
     HNode hmap;
     AVLNode tree;
 
-    char name[0];
     size_t len;
     double score;
+    char name[0];
 } ZNode;
 
 typedef struct {
@@ -448,13 +448,19 @@ bool zless_node(AVLNode *lhs, AVLNode *rhs)
 
 void zset_insert(ZSet *zset, const char *name, double score, size_t len) {
     printf("trying to add in the second level hashmap \n");
-    ZNode *node = calloc(7,sizeof(ZNode));
+    ZNode *node = calloc(7,sizeof(ZNode) + len);
 
-    node->len = len;
+    printf("the score we are getting : %d \n", score);
     node->score = score;
-    memcpy(&node->name[0], name, len);
-
+    node->len = len;
     node->hmap.hcode = hash_key(name);
+    memcpy(&node->name, name, len);
+
+    printf("the length we are getting : %d \n", len);
+    printf("set the length : %d \n", node->len);
+    printf("the set name : %s \n", node->name);
+    // printf("the score that is being tried to set: %s \n", node->score);
+
     // find if this exists already
 
     hm_insert(&zset->hmap, &node->hmap);
@@ -480,7 +486,9 @@ void z_score(StringVec *cmd) {
     Entry *ent = container_of(node, Entry, node);
 
     ZNode *znode = zset_lookup(&ent->zset, cmd->items[2], strlen(cmd->items[2]));
-    printf("znode score : %d \n", znode->score);
+    if(node) {
+        printf("znode score : %f \n", znode->score);
+    }
 }
 
 void insert_zadd(StringVec *cmd) {
@@ -500,9 +508,9 @@ void insert_zadd(StringVec *cmd) {
     hm_insert(&g_data.db, &ent->node);
 
     size_t len = strlen(cmd->items[3]);
-    double score = strlen(cmd->items[2]);
+    char *str = cmd->items[2];
+    double score = strtod(str, NULL);
     char *name = cmd->items[3];
-    printf("inserting the name : %s \n", name);
 
     zset_insert(&ent->zset, name, score, len);
 }
