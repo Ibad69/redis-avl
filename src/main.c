@@ -176,10 +176,16 @@ bool zless_node(AVLNode *lhs, AVLNode *rhs)
 static void tree_insert(ZSet *zset, ZNode *node) {
     AVLNode *parent = NULL;         // insert under this node
     AVLNode **from = &zset->root;   // the incoming pointer to the next node
+    if(*from == NULL) {
+        printf("dereferencing *from is null \n");
+    }
+    printf("outside the while am I even going insde the loop? \n");
     while (*from) {                 // tree search
+        printf("going through the treee : \n");
         parent = *from;
         from = zless_node(&node->tree, parent) ? &parent->left : &parent->right;
     }
+    printf("afteer whilee loop \n");
     *from = &node->tree;            // attach the new node
     node->tree.parent = parent;
     // zset->root = avl_fix(&node->tree);
@@ -198,7 +204,18 @@ void h_init(HTab *htab, size_t n) {
 // hashtable insertion
 void h_insert(HTab *htab, HNode *node) {
     printf("trying to insert some value in this \n");
+    if(node == NULL) {
+        printf("node is null \n");
+    }
+    if(htab->tab == NULL) {
+        printf("htab is null \n");
+    }
     size_t pos = node->hcode & htab->mask;
+
+    printf("htab mask : %d \n", htab->mask);
+    printf("node->hcode: %d \n", node->hcode);
+
+    printf("position is null : %d \n", pos);
     HNode *next = htab->tab[pos];
     printf("the position we are trying to add : %d \n", pos);
     node->next = next;
@@ -506,10 +523,14 @@ void zset_insert(ZSet *zset, const char *name, double score, size_t len) {
     node->len = len;
     node->hmap.hcode = hash_key(name);
     memcpy(&node->name, name, len);
+    node->tree.left = node->tree.right = node->tree.parent = NULL;
 
     printf("the length we are getting : %d \n", len);
     printf("set the length : %d \n", node->len);
     printf("the set name : %s \n", node->name);
+    // if(node->zset == NULL) {
+    //     printf("node zset is null \n");
+    // }
     // printf("the score that is being tried to set: %s \n", node->score);
 
     // find if this exists already
@@ -612,20 +633,35 @@ void z_range(StringVec *cmd) {
 
 
 void insert_zadd(StringVec *cmd) {
+
     // check if that value already exists for us 
+    HKey key;
+    key.node.hcode = hash_key(cmd->items[1]);
+    key.name = cmd->items[1];
+    key.len = strlen(cmd->items[1]);
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq); 
+
     Entry *ent = malloc(sizeof(Entry));
     if (!ent) {
         perror("malloc failed");
         exit(1);
     }
 
-    ent->key = strdup(cmd->items[1]);
-    // ent->value = value;
-    ent->node.hcode = hash_key(ent->key);
-    ent->node.next = NULL;   // important initialization
-    memset(&ent->zset, 0, sizeof(ZSet));
-
-    hm_insert(&g_data.db, &ent->node);
+    if(node != NULL) {
+        printf("existing map found for this !! \n");
+        ent->node = *node;
+        Entry *fent = container_of(node, Entry, node);
+        ent->zset = fent->zset;
+    }
+    else{
+        printf("creating a new map set for this \n");
+        ent->key = strdup(cmd->items[1]);
+        // ent->value = value;
+        ent->node.hcode = hash_key(ent->key);
+        ent->node.next = NULL;   // important initialization
+        memset(&ent->zset, 0, sizeof(ZSet));
+        hm_insert(&g_data.db, &ent->node);
+    }
 
     size_t len = strlen(cmd->items[3]);
     char *str = cmd->items[2];
