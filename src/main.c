@@ -113,6 +113,78 @@ static struct {
     HMap db; // top level hashtable
 }g_data;
 
+// -------------------------------TREE-------------------------
+static void print_tree_rec(AVLNode *node, int level) {
+    if (!node) return;
+
+    // go right first (so it's printed above)
+    print_tree_rec(node->right, level + 1);
+
+    // indent by level
+    for (int i = 0; i < level; i++) {
+        printf("    ");
+    }
+
+    // recover parent entry
+    ZNode *entry = container_of(node, ZNode, tree);
+    printf("> %s\n", entry->name);
+
+    // go left
+    print_tree_rec(node->left, level + 1);
+}
+
+
+// void tree_insert(AVLNode **root, AVLNode *new_node, bool (*zless)(AVLNode *, AVLNode *)) {
+//     printf("trying to add a new node \n");
+//     AVLNode *parent = NULL;
+//     AVLNode **from = root;
+
+//     for (AVLNode *node = *from; node;) {
+//         from = zless(node, new_node) ? &node->left : &node->right;
+//         parent = node;
+//         node = *from;
+//     }
+
+//     *from = new_node;
+//     new_node->parent = parent;
+
+//     // avl fix balance the tree after insertion
+// }
+
+// Compare lhs node against a (score, name) tuple
+bool zless_tuple(
+    AVLNode *lhs, double score, const char *name, size_t len)
+{
+    ZNode *zl = container_of(lhs, ZNode, tree);
+    if (zl->score != score) {
+        return zl->score < score;
+    }
+    int rv = memcmp(zl->name, name, zl->len < len ? zl->len : len);
+    if (rv != 0) {
+        return rv < 0;
+    }
+    return zl->len < len;
+}
+
+// Compare lhs node against rhs node
+bool zless_node(AVLNode *lhs, AVLNode *rhs)
+{
+    ZNode *zr = container_of(rhs, ZNode, tree);
+    return zless_tuple(lhs, zr->score, zr->name, zr->len);
+}
+
+static void tree_insert(ZSet *zset, ZNode *node) {
+    AVLNode *parent = NULL;         // insert under this node
+    AVLNode **from = &zset->root;   // the incoming pointer to the next node
+    while (*from) {                 // tree search
+        parent = *from;
+        from = zless_node(&node->tree, parent) ? &parent->left : &parent->right;
+    }
+    *from = &node->tree;            // attach the new node
+    node->tree.parent = parent;
+    // zset->root = avl_fix(&node->tree);
+}
+
 // ******************HASHMAP*****************//
 // static HMap *hmap = NULL; 
 
@@ -424,27 +496,6 @@ Conns* init_client_arr() {
     return Conns_;
 }
 
-// Compare lhs node against a (score, name) tuple
-bool zless_tuple(
-    AVLNode *lhs, double score, const char *name, size_t len)
-{
-    ZNode *zl = container_of(lhs, ZNode, tree);
-    if (zl->score != score) {
-        return zl->score < score;
-    }
-    int rv = memcmp(zl->name, name, zl->len < len ? zl->len : len);
-    if (rv != 0) {
-        return rv < 0;
-    }
-    return zl->len < len;
-}
-
-// Compare lhs node against rhs node
-bool zless_node(AVLNode *lhs, AVLNode *rhs)
-{
-    ZNode *zr = container_of(rhs, ZNode, tree);
-    return zless_tuple(lhs, zr->score, zr->name, zr->len);
-}
 
 void zset_insert(ZSet *zset, const char *name, double score, size_t len) {
     printf("trying to add in the second level hashmap \n");
@@ -464,7 +515,9 @@ void zset_insert(ZSet *zset, const char *name, double score, size_t len) {
     // find if this exists already
 
     hm_insert(&zset->hmap, &node->hmap);
+    tree_insert(zset, node);
     // tree_insert(&zset->root, &node->tree, zless_node);
+    print_tree_rec(zset->root, 2);
 }
 
 void z_score(StringVec *cmd) {
@@ -490,6 +543,73 @@ void z_score(StringVec *cmd) {
         printf("znode score : %f \n", znode->score);
     }
 }
+
+
+void range_traverse(int min, int max, AVLNode *node, int counter) {
+    char list[(max-min)+1];
+    int list_size = 0;
+    // AVLNode *curr = zset->root;
+
+    ZNode *ent = container_of(node, ZNode, tree);
+
+    printf("min is : %d \n", min);
+    printf("max is : %d \n", max);
+
+    print_tree_rec(node, 1);
+
+    if(counter >= min && counter <= max) {
+        printf("entry name at this range : %s \n", ent->name);
+        printf("score at this range : %f \n", ent->score);
+    }
+
+    if (!node) return;
+    if (node->left) {
+        printf("going towards left \n");
+        range_traverse(min, max, node->left, counter);
+        counter++;
+    }
+    if (node->right) {
+        printf("going towards right \n");
+        range_traverse(min, max, node->right, counter);
+        counter++;
+    }
+
+    // curr = ent->tree.left;
+    // while(counter < max) {
+    //     if (counter >= min && counter <= max) {
+    //         ZNode *ent = container_of(curr, ZNode, tree);
+    //         printf("entry name at this range : %s \n", ent->name);
+    //         printf("score at this range : %f \n", ent->score);
+    //         curr = ent->tree.left;
+    //         // list[list_size] = curr;
+    //     }
+    //     counter++;
+    // }
+    
+}
+
+void z_range(StringVec *cmd) {
+    // upper level hashtable finding
+    printf("finding the zscore \n");
+    LookupKey key;
+    key.key = malloc(strlen(cmd->items[1])+1);
+    if(key.key) {
+        strcpy(key.key, cmd->items[1]);
+        key.node.hcode = hash_key(key.key);
+    }
+    // hashtable lookup
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (!node) {
+        printf("couldn't find nodee ------ \n");
+        // return out_nil(out);
+    }
+    int min = atoi(cmd->items[2]);
+    int max = atoi(cmd->items[3]);
+
+    Entry *ent = container_of(node, Entry, node);
+    range_traverse(min, max, ent->zset.root, 0);
+}
+
 
 void insert_zadd(StringVec *cmd) {
     // check if that value already exists for us 
@@ -626,6 +746,10 @@ void do_zscore(buffer_type *out, StringVec *cmd) {
     z_score(cmd);
 }
 
+void do_zrange(buffer_type *out, StringVec *cmd) {
+    z_range(cmd);
+}
+
 
 void do_request(StringVec *strvec, buffer_type *buf) {
     if(strcmp(strvec->items[0], "get") == 0) {
@@ -650,6 +774,9 @@ void do_request(StringVec *strvec, buffer_type *buf) {
     }
     if(strcmp(strvec->items[0], "zscore") == 0) {
         do_zscore(buf, strvec);
+    }
+    if(strcmp(strvec->items[0], "zrange") == 0 ) {
+        do_zrange(buf, strvec);
     }
 }
 
@@ -684,23 +811,6 @@ void buff_consume(buffer_type *buf, size_t len) {
     buf->size-= len;
 }
 
-// -------------------------------TREE-------------------------
-
-void tree_insert(AVLNode **root, AVLNode *new_node, bool (*zless)(AVLNode *, AVLNode *)) {
-    AVLNode *parent = NULL;
-    AVLNode **from = root;
-
-    for (AVLNode *node = *from; node;) {
-        from = zless(node, new_node) ? &node->left : &node->right;
-        parent = node;
-        node = *from;
-    }
-
-    *from = new_node;
-    new_node->parent = parent;
-
-    // avl fix balance the tree after insertion
-}
 
 // ----------------------------SERVER-----------------------
 int get_listener() {
