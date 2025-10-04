@@ -127,7 +127,7 @@ static void print_tree_rec(AVLNode *node, int level) {
 
     // recover parent entry
     ZNode *entry = container_of(node, ZNode, tree);
-    printf("> %s\n", entry->name);
+    printf("> %s : %f\n", entry->name, entry->score);
 
     // go left
     print_tree_rec(node->left, level + 1);
@@ -566,34 +566,42 @@ void z_score(StringVec *cmd) {
 }
 
 
-void range_traverse(int min, int max, AVLNode *node, int counter) {
+bool range_traverse(int min, int max, AVLNode *node, int *counter) {
+
+    if (!node) return false;
+
     char list[(max-min)+1];
     int list_size = 0;
     // AVLNode *curr = zset->root;
 
     ZNode *ent = container_of(node, ZNode, tree);
 
-    printf("min is : %d \n", min);
+    // printf("min is : %d \n", min);
     printf("max is : %d \n", max);
+    // print_tree_rec(node, 1);
 
-    print_tree_rec(node, 1);
-
-    if(counter >= min && counter <= max) {
+    if(*counter >= min) {
+        printf("the counter is : %d \n", *counter);
         printf("entry name at this range : %s \n", ent->name);
         printf("score at this range : %f \n", ent->score);
     }
+    if(*counter == max) {
+        printf("counte reached max \n");
+        return true;
+    }
 
-    if (!node) return;
     if (node->left) {
-        printf("going towards left \n");
-        range_traverse(min, max, node->left, counter);
-        counter++;
+        // printf("going towards left \n");
+        (*counter)++;
+        if (range_traverse(min, max, node->left, counter)) return true;
     }
     if (node->right) {
-        printf("going towards right \n");
-        range_traverse(min, max, node->right, counter);
-        counter++;
+        // printf("going towards right \n");
+        (*counter)++;
+        if (range_traverse(min, max, node->right, counter)) return true;
     }
+
+    return false;
 
     // curr = ent->tree.left;
     // while(counter < max) {
@@ -628,7 +636,8 @@ void z_range(StringVec *cmd) {
     int max = atoi(cmd->items[3]);
 
     Entry *ent = container_of(node, Entry, node);
-    range_traverse(min, max, ent->zset.root, 0);
+    int counter = 0;
+    range_traverse(min, max, ent->zset.root, &counter);
 }
 
 
