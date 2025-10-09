@@ -66,6 +66,7 @@ struct HNode {
 typedef struct HNode HNode;
 
 void out_nil(buffer_type *out);
+void out_str(buffer_type *out, char *s, size_t size);
 
 typedef struct  {
     HNode **tab;
@@ -108,6 +109,12 @@ typedef struct {
     char *key;
     char *string;
 } Entry;
+
+typedef struct {
+    char **item;
+    size_t count;
+    // size_t size;
+} OutArr;
 
 static struct {
     HMap db; // top level hashtable
@@ -541,7 +548,7 @@ void zset_insert(ZSet *zset, const char *name, double score, size_t len) {
     print_tree_rec(zset->root, 2);
 }
 
-void z_score(StringVec *cmd) {
+void z_score(StringVec *cmd, buffer_type *out) {
     // upper level hashtable finding
     printf("finding the zscore \n");
     LookupKey key;
@@ -554,24 +561,30 @@ void z_score(StringVec *cmd) {
     HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if (!node) {
         printf("couldn't find nodee ------ \n");
-        // return out_nil(out);
+        out_nil(out);
+        return;
     }
 
     Entry *ent = container_of(node, Entry, node);
 
     ZNode *znode = zset_lookup(&ent->zset, cmd->items[2], strlen(cmd->items[2]));
     if(node) {
-        printf("znode score : %f \n", znode->score);
+        char temp [20];
+        sprintf(temp, "score: %.2f", znode->score);
+        // printf("znode score : %f \n", znode->score);
+        out_str(out, temp, strlen(temp));
+        return;
     }
+    out_nil(out);
 }
 
 
-bool range_traverse(int min, int max, AVLNode *node, int *counter) {
+bool range_traverse(int min, int max, AVLNode *node, int *counter, OutArr *list) {
 
     if (!node) return false;
 
-    char list[(max-min)+1];
-    int list_size = 0;
+    // char list[(max-min)+1];
+    // int list_size = 0;
     // AVLNode *curr = zset->root;
 
     ZNode *ent = container_of(node, ZNode, tree);
@@ -581,6 +594,8 @@ bool range_traverse(int min, int max, AVLNode *node, int *counter) {
     // print_tree_rec(node, 1);
 
     if(*counter >= min) {
+        list->item[list->count] = ent->name;
+        list->count++;
         printf("the counter is : %d \n", *counter);
         printf("entry name at this range : %s \n", ent->name);
         printf("score at this range : %f \n", ent->score);
@@ -593,12 +608,12 @@ bool range_traverse(int min, int max, AVLNode *node, int *counter) {
     if (node->left) {
         // printf("going towards left \n");
         (*counter)++;
-        if (range_traverse(min, max, node->left, counter)) return true;
+        if (range_traverse(min, max, node->left, counter, list)) return true;
     }
     if (node->right) {
         // printf("going towards right \n");
         (*counter)++;
-        if (range_traverse(min, max, node->right, counter)) return true;
+        if (range_traverse(min, max, node->right, counter, list)) return true;
     }
 
     return false;
@@ -617,7 +632,7 @@ bool range_traverse(int min, int max, AVLNode *node, int *counter) {
     
 }
 
-void z_range(StringVec *cmd) {
+void z_range(StringVec *cmd, buffer_type *out) {
     // upper level hashtable finding
     printf("finding the zscore \n");
     LookupKey key;
@@ -630,14 +645,25 @@ void z_range(StringVec *cmd) {
     HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
     if (!node) {
         printf("couldn't find nodee ------ \n");
-        // return out_nil(out);
+        out_nil(out);
+        return;
     }
     int min = atoi(cmd->items[2]);
     int max = atoi(cmd->items[3]);
 
     Entry *ent = container_of(node, Entry, node);
     int counter = 0;
-    range_traverse(min, max, ent->zset.root, &counter);
+
+    char **item = malloc(sizeof(char*)*12);
+    OutArr list = {.item = item, count: 0};
+
+    range_traverse(min, max, ent->zset.root, &counter, &list);
+
+    for(int i = 0; i < list.count; i++) {
+        // char temp[20];
+        printf("the item that is stored : %s \n", list.item[i]);
+        out_str(out, list.item[i], strlen(list.item[i]));
+    }
 }
 
 
@@ -788,11 +814,11 @@ void do_zadd(buffer_type *out, StringVec *cmd) {
 }
 
 void do_zscore(buffer_type *out, StringVec *cmd) {
-    z_score(cmd);
+    z_score(cmd, out);
 }
 
 void do_zrange(buffer_type *out, StringVec *cmd) {
-    z_range(cmd);
+    z_range(cmd, out);
 }
 
 
@@ -1089,8 +1115,13 @@ void strip_newline(char *s) {
                 return;
             }
 
+            printf("writing done \n");
+            printf("size of out going buff : %d \n", client->outgoing_buff->size);
+            for (size_t i = 0; i < client->outgoing_buff->size; i++){
+                printf("%02x ", client->outgoing_buff->buff[i]);
+            }
+            printf("\n");
             buff_consume(client->outgoing_buff, (size_t)rv);
-
             // update the readiness intention
             if (client->outgoing_buff->size == 0) {   // all data written
             client->want_read = true;
@@ -1134,6 +1165,8 @@ void strip_newline(char *s) {
             while(try_one_request(&client) == 1){}
 
             if(client.outgoing_buff->size > 4 ) {
+                printf("outgonig buff size is writable \n");
+                printf("client outgoing buff size over here : %d \n", client.outgoing_buff->size);
                 client.want_write = 1;
                 client.want_read = 0;
                 handle_write(&client);

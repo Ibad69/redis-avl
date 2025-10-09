@@ -82,40 +82,55 @@ static int32_t send_req(int fd, int argc, char **argv) {
 }
 
 static int32_t read_res(int fd) {
-    char rbuf[4 + K_MAX_MSG];
+    uint8_t rbuf[4 + K_MAX_MSG];
     errno = 0;
-    int32_t err = read_full(fd, rbuf, 4);
+
+    // 1️⃣ Read the 4-byte frame length prefix
+    uint32_t frame_len = 0;
+    int32_t err = read_full(fd, (uint8_t *)&frame_len, 4);
     if (err) {
         if (errno == 0) {
-            msg("EOF");
+            msg("EOF while reading frame length");
         } else {
-            msg("read() error");
+            msg("read() error while reading frame length");
         }
         return err;
     }
 
-    uint32_t len = 0;
-    memcpy(&len, rbuf, 4);  // assume little endian
-    if (len > K_MAX_MSG) {
-        msg("too long");
+    if (frame_len > K_MAX_MSG) {
+        msg("frame too long");
         return -1;
     }
 
-    err = read_full(fd, &rbuf[4], len);
+    // 2️⃣ Read the rest of the frame (frame_len bytes)
+    err = read_full(fd, rbuf, frame_len);
     if (err) {
-        msg("read() error");
+        msg("read() error while reading frame body");
         return err;
     }
 
-    uint32_t rescode = 0;
-    if (len < 4) {
-        msg("bad response");
+    // 3️⃣ Parse the actual message inside the frame
+    // Expected format: [tag:1][len:4][payload:len]
+    if (frame_len < 5) {
+        msg("bad frame (too short)");
         return -1;
     }
-    memcpy(&rescode, &rbuf[4], 4);
 
-    printf("server says: [%u] %.*s\n",
-           rescode, (int)(len - 4), &rbuf[8]);
+    uint8_t tag = rbuf[0];
+    uint32_t len = 0;
+    memcpy(&len, &rbuf[1], 4);  // assuming little-endian both sides
+
+    if (len + 5 != frame_len) {
+        printf("warning: declared len (%u) doesn't match frame_len (%u)\n", len, frame_len);
+    }
+
+    if (len > K_MAX_MSG) {
+        msg("payload too long");
+        return -1;
+    }
+
+    // 4️⃣ Print nicely
+    printf("server says (tag=%u): %.*s\n", tag, (int)len, (char *)&rbuf[5]);
     return 0;
 }
 
