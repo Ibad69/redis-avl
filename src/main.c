@@ -120,7 +120,8 @@ static struct {
     HMap db; // top level hashtable
 }g_data;
 
-// -------------------------------TREE-------------------------
+// ****************************TREE******************* //
+
 static void print_tree_rec(AVLNode *node, int level) {
     if (!node) return;
 
@@ -138,6 +139,102 @@ static void print_tree_rec(AVLNode *node, int level) {
 
     // go left
     print_tree_rec(node->left, level + 1);
+}
+
+// helpers
+uint32_t avl_height(AVLNode *node) { return node ? node->height : 0; }
+uint32_t avl_cnt(AVLNode *node) { return node ? node->cnt : 0; }
+
+static uint32_t max(uint32_t lhs, uint32_t rhs) {
+    return lhs < rhs ? rhs : lhs;
+}
+
+// maintain the height and cnt field
+static void avl_update(AVLNode *node) {
+    node->height = 1 + max(avl_height(node->left), avl_height(node->right));
+    node->cnt = 1 + avl_cnt(node->left) + avl_cnt(node->right);
+}
+
+static AVLNode *rot_left(AVLNode *node) {
+    AVLNode *parent = node->parent;
+    AVLNode *new_node = node->right;
+    AVLNode *inner = new_node->left;
+
+    node->right = inner;
+    if(inner) {
+        inner->parent = node; 
+    }
+
+    new_node->parent = parent;
+    new_node->left = node;
+    node->parent = new_node;
+
+    avl_update(node);
+    avl_update(new_node);
+
+    return new_node;
+}
+
+static AVLNode *rot_right(AVLNode *node) {
+    AVLNode *parent = node->parent;
+    AVLNode *new_node = node->left;
+    AVLNode *inner = new_node->right;
+
+    node->left = inner;
+    if(inner) {
+        inner->parent = node;
+    }
+
+    new_node->parent = parent;
+    new_node->right = node;
+    node->parent = new_node;
+
+    avl_update(node);
+    avl_update(new_node);
+    return new_node;
+
+}
+
+AVLNode *avl_fix_left(AVLNode *node)  {
+    if(avl_height(node->left->left) < avl_height(node->left->right)) {
+        node->left = rot_left(node->left);
+    }
+    return rot_right(node);
+}
+
+AVLNode *avl_fix_right(AVLNode *node)  {
+    if(avl_height(node->right->right) < avl_height(node->right->left)) {
+        node->right = rot_right(node->right);
+    }
+    return rot_left(node);
+}
+
+AVLNode *avl_fix(AVLNode *node) {
+    while(true) {
+       AVLNode **from = &node; 
+       AVLNode *parent = node->parent;
+
+       if(parent) {
+           from = parent->right == node ? &parent->right : &parent->left;
+       }
+
+       avl_update(node);
+
+       uint32_t l = avl_height(node->left);
+       uint32_t r = avl_height(node->right);
+       if(l == r+2) {
+           *from = avl_fix_left(node);
+       }
+       else if(l + 2 == r) {
+           *from = avl_fix_right(node);
+       }
+
+       if(!parent) {
+           return *from;
+       }
+
+       node = parent;
+    }
 }
 
 
@@ -195,7 +292,7 @@ static void tree_insert(ZSet *zset, ZNode *node) {
     printf("afteer whilee loop \n");
     *from = &node->tree;            // attach the new node
     node->tree.parent = parent;
-    // zset->root = avl_fix(&node->tree);
+    zset->root = avl_fix(&node->tree);
 }
 
 // ******************HASHMAP*****************//
@@ -660,7 +757,6 @@ void z_range(StringVec *cmd, buffer_type *out) {
     range_traverse(min, max, ent->zset.root, &counter, &list);
 
     for(int i = 0; i < list.count; i++) {
-        // char temp[20];
         printf("the item that is stored : %s \n", list.item[i]);
         out_str(out, list.item[i], strlen(list.item[i]));
     }
