@@ -675,6 +675,27 @@ void z_score(StringVec *cmd, buffer_type *out) {
     out_nil(out);
 }
 
+bool rank_traverse(AVLNode *node, int *counter, char *name, int *index) {
+
+    if (!node) return false;
+    ZNode *ent = container_of(node, ZNode, tree);
+
+    if(name == ent->name) {
+        index = counter;
+        return true;
+    }
+    if (node->left) {
+        (*counter)++;
+        if (rank_traverse(node, counter, name, index)) return true;
+    }
+    if (node->right) {
+        (*counter)++;
+        if (rank_traverse(node, counter, name, index)) return true;
+    }
+
+    return false;
+}
+
 
 bool range_traverse(int min, int max, AVLNode *node, int *counter, OutArr *list) {
 
@@ -757,11 +778,42 @@ void z_range(StringVec *cmd, buffer_type *out) {
     range_traverse(min, max, ent->zset.root, &counter, &list);
 
     for(int i = 0; i < list.count; i++) {
-        printf("the item that is stored : %s \n", list.item[i]);
         out_str(out, list.item[i], strlen(list.item[i]));
     }
 }
 
+
+void z_rank(StringVec *cmd, buffer_type *out) {
+    // upper level hashtable finding
+    printf("finding the zscore \n");
+    LookupKey key;
+    key.key = malloc(strlen(cmd->items[1])+1);
+    if(key.key) {
+        strcpy(key.key, cmd->items[1]);
+        key.node.hcode = hash_key(key.key);
+    }
+    // hashtable lookup
+    HNode *node = hm_lookup(&g_data.db, &key.node, &entry_eq);
+    if (!node) {
+        printf("couldn't find nodee ------ \n");
+        out_nil(out);
+        return;
+    }
+
+    Entry *ent = container_of(node, Entry, node);
+    int counter = 0;
+
+    char **item = malloc(sizeof(char*)*12);
+
+    int index = 0;
+
+    if(rank_traverse(ent->zset.root, &counter, cmd->items[2], &index)) {
+        char str[20];
+        sprintf(str, "%d", index);
+        out_str(out, str, strlen(str));
+    };
+
+}
 
 void insert_zadd(StringVec *cmd) {
 
@@ -917,6 +969,9 @@ void do_zrange(buffer_type *out, StringVec *cmd) {
     z_range(cmd, out);
 }
 
+void do_zrank(buffer_type *out, StringVec *cmd) {
+    z_rank(cmd, out);
+}
 
 void do_request(StringVec *strvec, buffer_type *buf) {
     if(strcmp(strvec->items[0], "get") == 0) {
@@ -944,6 +999,9 @@ void do_request(StringVec *strvec, buffer_type *buf) {
     }
     if(strcmp(strvec->items[0], "zrange") == 0 ) {
         do_zrange(buf, strvec);
+    }
+    if(strcmp(strvec->items[0], "zrank") == 0 ) {
+        do_zrank(buf, strvec);
     }
 }
 
